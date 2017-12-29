@@ -163,7 +163,7 @@ get_email(JObj, AccountId, MasterAccountId) ->
             lager:debug("billing contact email not set or low balance disabled for account ~s"
                        ,[AccountId]
                        ),
-            ResellerId = kz_services:find_reseller_id(AccountId),
+            ResellerId = kz_services_reseller:find_id(AccountId),
             get_email(ResellerId, MasterAccountId);
         Email -> Email
     end.

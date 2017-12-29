@@ -5,21 +5,9 @@
 %%%-----------------------------------------------------------------------------
 -module(j5_util).
 
--export([remove_call_charges/2]).
 -export([send_system_alert/1]).
 
 -include("jonny5.hrl").
-
--spec remove_call_charges(kz_term:api_binary(), kz_term:api_binary()) -> 'ok'.
-remove_call_charges('undefined', _) -> 'ok';
-remove_call_charges(_, 'undefined') -> 'ok';
-remove_call_charges(AccountId, CallId) ->
-    case kz_transactions:call_charges(AccountId, CallId, 'false') of
-        [] -> 'ok';
-        Transactions ->
-            _ = kz_transactions:remove(Transactions),
-            'ok'
-    end.
 
 -spec send_system_alert(j5_request:request()) -> any().
 send_system_alert(Request) ->

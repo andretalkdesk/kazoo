@@ -253,7 +253,7 @@ validate_chunk_view(Context) ->
 -spec load_chunk_view(cb_context:context(), kz_term:ne_binary(), kz_term:proplist()) -> cb_context:context().
 load_chunk_view(Context, ViewName, Options0) ->
     AuthAccountId = cb_context:auth_account_id(Context),
-    IsReseller = kz_services:is_reseller(AuthAccountId),
+    IsReseller = kz_services_reseller:is_reseller(AuthAccountId),
     Options = [{'is_chunked', 'true'}
               ,{'chunk_size', ?MAX_BULK}
                | Options0
@@ -445,7 +445,7 @@ normalize_cdr_to_csv(JObj, Context, Acc) ->
 -spec csv_rows(cb_context:context()) -> [{kz_term:ne_binary(), csv_column_fun()}].
 csv_rows(Context) ->
     AuthAccountId = cb_context:auth_account_id(Context),
-    case kz_services:is_reseller(AuthAccountId) of
+    case kz_services_reseller:is_reseller(AuthAccountId) of
         'false' -> ?COLUMNS;
         'true' -> ?COLUMNS ++ ?COLUMNS_RESELLER
     end.

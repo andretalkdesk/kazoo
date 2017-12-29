@@ -25,7 +25,14 @@ start_link() ->
 modb(?MATCH_MODB_SUFFIX_ENCODED(_AccountId, _Year, _Month) = AccountMODb) ->
     modb(kz_util:format_account_modb(AccountMODb, 'raw'));
 modb(?MATCH_MODB_SUFFIX_RAW(AccountId, _Year, _Month) = AccountMODb) ->
-    ServicesJObj = kz_services:to_json(kz_services:fetch(AccountId)),
+    FetchOptions = ['hydrate_account_quantities'
+                   ,'hydrate_cascade_quantities'
+                   ,'skip_cache'
+                   ],
+    Services = kz_services:fetch(AccountId, FetchOptions),
+    ServicesJObj = kz_doc:public_fields(
+                     kz_services:services_jobj(Services)
+                    ),
     save_services_to_modb(AccountMODb, ServicesJObj, ?SERVICES_BOM),
     maybe_save_to_previous_modb(AccountMODb, ServicesJObj).
 

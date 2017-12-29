@@ -105,7 +105,7 @@ validate(Context) ->
 -spec load_chunk_view(cb_context:context(), kz_term:ne_binary(), kz_term:proplist()) -> cb_context:context().
 load_chunk_view(Context, ViewName, Options0) ->
     AuthAccountId = cb_context:auth_account_id(Context),
-    IsReseller = kz_services:is_reseller(AuthAccountId),
+    IsReseller = kz_services_reseller:is_reseller(AuthAccountId),
     Options = [{'is_chunked', 'true'}
               ,{'chunk_size', ?MAX_BULK}
                | Options0

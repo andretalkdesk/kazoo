@@ -41,7 +41,6 @@
 -export([from_json/1]).
 -export([remove/1]).
 -export([save/1]).
--export([service_save/1]).
 -export([is_per_minute/1]).
 
 -include("transactions.hrl").
@@ -458,39 +457,6 @@ save(#kz_transaction{}=Transaction) ->
 %% @doc
 %% @end
 %%------------------------------------------------------------------------------
--spec service_save(transaction()) -> {'ok', transaction()} |
-                                     {'error', any()}.
-service_save(#kz_transaction{}=Transaction) ->
-    case prepare_transaction(Transaction) of
-        {'error', _}=E -> E;
-        #kz_transaction{}=T ->
-            service_save_transaction(T)
-    end.
-
--spec service_save_transaction(transaction()) -> {'ok', transaction()} |
-                                                 {'error', any()}.
-service_save_transaction(#kz_transaction{pvt_account_id = AccountId}=Transaction) ->
-    TransactionJObj = to_json(Transaction#kz_transaction{pvt_modified = kz_time:now_s()
-                                                        }),
-    case kz_services:fetch_services_doc(AccountId, true) of
-        {'error', _R}=Error ->
-            lager:debug("unable to open account ~s services doc: ~p", [AccountId, _R]),
-            Error;
-        {'ok', ServicesJObj} ->
-            Transactions = kz_json:get_list_value(<<"transactions">>, ServicesJObj, []),
-            Props = [{<<"transactions">>, [TransactionJObj|Transactions]}
-                    ,{?SERVICES_PVT_IS_DIRTY, 'true'}
-                    ],
-            case kz_datamgr:save_doc(?KZ_SERVICES_DB, kz_json:set_values(Props, ServicesJObj)) of
-                {'error', _R}=Error ->
-                    lager:debug("failed to save account ~s services doc for transaction ~s: ~p"
-                               ,[AccountId, kz_doc:id(TransactionJObj), _R]),
-                    Error;
-                {'ok', _} ->
-                    {'ok', from_json(TransactionJObj)}
-            end
-    end.
-
 -spec prepare_transaction(transaction()) -> transaction() | {'error', any()}.
 prepare_transaction(#kz_transaction{id = 'undefined'}=Transaction) ->
     prepare_transaction(Transaction#kz_transaction{id = modb_doc_id()});

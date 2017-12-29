@@ -884,7 +884,7 @@ check_account(Account, ValueFun) ->
 
 -spec check_reseller(kz_term:api_binary(), fun(), any()) -> any().
 check_reseller(Account, ValueFun, Default) ->
-    Reseller = kz_services:find_reseller_id(Account),
+    Reseller = kz_services_reseller:find_id(Account),
     case check_account(Reseller, ValueFun) of
         'undefined' -> Default;
         Value -> Value

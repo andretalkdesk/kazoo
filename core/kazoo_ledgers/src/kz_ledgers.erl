@@ -8,9 +8,13 @@
 
 -include("kzl.hrl").
 
--export([get/1, get/3
-        ,get_ranged/1
-        ,available_ledgers/1
+-export([list_source/2
+        ,list_source/4
+        ]).
+-export([total_source/2
+        ,total_source/4
+        ]).
+-export([available_ledgers/1
         ]).
 
 -define(DEFAULT_AVIALABLE_LEDGERS,
@@ -21,68 +25,106 @@
         ]
        ).
 
+-type ledgers() :: [kz_ledger:ledger()].
+-export_type([ledgers/0]).
+
 %%------------------------------------------------------------------------------
 %% @doc
 %% @end
 %%------------------------------------------------------------------------------
-
--spec get(kz_term:ne_binary()) -> {'ok', kz_json:object()} |
-                                  {'error', atom()}.
-get(Account) ->
-    get(Account, 'undefined', 'undefined').
-
--spec get(kz_term:ne_binary(), kz_time:api_seconds(), kz_time:api_seconds()) ->
-                 {'ok', kz_json:object()} |
+-spec list_source(kz_term:ne_binary(), kz_term:ne_binary()) ->
+                 {'ok', kz_json:objects()} |
                  {'error', atom()}.
-get(Account, 'undefined', 'undefined') ->
-    case kazoo_modb:get_results(Account, ?TOTAL_BY_SERVICE_LEGACY, ['group']) of
-        {'error', _R}=Error -> Error;
-        {'ok', JObjs}->
-            LedgersJObj = kz_json:from_list(
-                            [{kz_json:get_value(<<"key">>, JObj), kz_json:get_value(<<"value">>, JObj)}
-                             || JObj <- JObjs
-                            ]),
-            {'ok', LedgersJObj}
-    end;
+list_source(Account, Source) ->
+    Options = [{'startkey', [Source]}
+              ,{'endkey', [Source, kz_json:new()]}
+              ],
+    case kazoo_modb:get_results(Account, ?LIST_BY_SOURCE, Options) of
+        {'error', _} = Error -> Error;
+        {'ok', JObjs} ->
+            {'ok', [kz_json:get_value(<<"value">>, JObj) || JObj <- JObjs]}
+    end.
 
-get(Account, CreatedFrom, CreatedTo)
+-spec list_source(kz_term:ne_binary(), kz_term:ne_binary(), kz_time:seconds(), kz_time:seconds()) ->
+                          {'ok', kz_json:objects()} |
+                          {'error', atom()}.
+list_source(Account, Source, CreatedFrom, CreatedTo)
   when is_integer(CreatedFrom), CreatedFrom > 0,
        is_integer(CreatedTo), CreatedTo > 0 ->
     MODBs = kazoo_modb:get_range(Account, CreatedFrom, CreatedTo),
     Options = [{'databases', MODBs}
-              ,{'startkey', CreatedFrom}
-              ,{'endkey', CreatedTo}
+              ,{'startkey', [Source, CreatedFrom]}
+              ,{'endkey', [Source, CreatedTo]}
               ],
-    get_ranged(Options).
+    get_ranged(?LIST_BY_SOURCE, Options).
 
--spec get_ranged(kz_term:proplist()) -> {'ok', kz_json:object()} | {'error', any()}.
-get_ranged(Options) ->
+%%------------------------------------------------------------------------------
+%% @doc
+%% @end
+%%------------------------------------------------------------------------------
+-spec total_source(kz_term:ne_binary(), kz_term:ne_binary()) ->
+                 {'ok', kz_json:object()} |
+                 {'error', atom()}.
+total_source(Account, Source) ->
+    Options = [{'startkey', [Source]}
+              ,{'endkey', [Source, kz_json:new()]}
+              ,'group'
+              ],
+    kazoo_modb:get_results(Account, ?TOTAL_BY_SOURCE, Options).
+
+
+-spec total_source(kz_term:ne_binary(), kz_term:ne_binary(), kz_time:seconds(), kz_time:seconds()) ->
+                          {'ok', kz_json:object()} |
+                          {'error', atom()}.
+total_source(Account, Source, CreatedFrom, CreatedTo)
+  when is_integer(CreatedFrom), CreatedFrom > 0,
+       is_integer(CreatedTo), CreatedTo > 0 ->
+    MODBs = kazoo_modb:get_range(Account, CreatedFrom, CreatedTo),
+    Options = [{'databases', MODBs}
+              ,{'startkey', [Source, CreatedFrom]}
+              ,{'endkey', [Source, CreatedTo]}
+              ,'group'
+              ],
+    get_ranged(?TOTAL_BY_SOURCE, Options).
+
+%%------------------------------------------------------------------------------
+%% @doc
+%% @end
+%%------------------------------------------------------------------------------
+-spec get_ranged(kz_term:ne_binary(), kz_term:proplist()) -> {'ok', kz_json:objects()} | {'error', any()}.
+get_ranged(View, Options) ->
     MODBs = props:get_value('databases', Options, []),
-    ViewOptions = props:filter_undefined([{'group', 'true'}
-                                         ,{'group_level', 0}
-                                         ,{'reduce', 'true'}
-                                          | props:delete('databases', Options)
-                                         ]),
+    case MODBs =:= [] of
+        'true' -> {'error', 'no_account_db'};
+        'false' ->
+            ViewOptions = props:filter_undefined([{'group', 'true'}
+                                                 ,{'group_level', 0}
+                                                 ,{'reduce', 'true'}
+                                                  | props:delete('databases', Options)
+                                                 ]),
+            lager:debug("getting ledgers starting from ~p to ~p from dbs: ~p"
+                       ,[props:get_value('startkey', ViewOptions)
+                        ,props:get_value('endkey', ViewOptions)
+                        ,MODBs
+                        ]),
+            get_ranged(View, Options, MODBs, [])
+    end.
 
-    lager:debug("getting total starting from ~p to ~p from dbs: ~p"
-               ,[props:get_value('startkey', ViewOptions)
-                ,props:get_value('endkey', ViewOptions)
-                ,MODBs
-                ]),
-
-    try
-        MODBs =:= []
-            andalso throw('no_account_db'),
-        Sum = kz_json:sum_jobjs(
-                [case kazoo_modb:get_results(MODB, <<"ledgers/list_by_timestamp_legacy">>, Options) of
-                     {'error', Reason} -> throw(Reason);
-                     {'ok', JObjs} -> [kz_json:get_value(<<"value">>, JObj) || JObj <- JObjs]
-                 end
-                 || MODB <- MODBs
-                ]),
-        {'ok', Sum}
-    catch
-        'throw':_R -> {'error', _R}
+-spec get_ranged(kz_term:ne_binary(), kz_term:proplist(), kz_term:ne_binaries(), kz_json:objects()) ->
+                        {'ok', kz_json:objects()} |
+                        {'error', any()}.
+get_ranged(_View, _Options, [], Results) -> {'ok', Results};
+get_ranged(View, Options, [MODB|MODBs], Results) ->
+    case kazoo_modb:get_results(MODB, View, Options) of
+        {'error', _Reason} = Error -> Error;
+        {'ok', JObjs} ->
+            get_ranged(View
+                      ,Options
+                      ,MODBs
+                      ,[kz_json:get_value(<<"value">>, JObj)
+                        || JObj <- JObjs
+                       ] ++ Results
+                      )
     end.
 
 -spec available_ledgers(kz_term:api_binary()) -> kz_json:objects().

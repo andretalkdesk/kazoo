@@ -19,8 +19,6 @@
 -include_lib("kazoo_transactions/include/kazoo_transactions.hrl").
 
 -define(CURRENT_BALANCE, <<"current_balance">>).
--define(MONTHLY, <<"monthly_recurring">>). %% wht_util:monthly_recurring()
--define(SUBSCRIPTIONS, <<"subscriptions">>).
 -define(CREDIT, <<"credit">>).
 -define(DEBIT, <<"debit">>).
 
@@ -78,11 +76,7 @@ allowed_methods(?CURRENT_BALANCE) ->
 allowed_methods(?CREDIT) ->
     [?HTTP_PUT];
 allowed_methods(?DEBIT) ->
-    [?HTTP_DELETE];
-allowed_methods(?MONTHLY) ->
-    [?HTTP_GET];
-allowed_methods(?SUBSCRIPTIONS) ->
-    [?HTTP_GET].
+    [?HTTP_DELETE].
 
 %%------------------------------------------------------------------------------
 %% @doc Does the path point to a valid resource.
@@ -135,7 +129,7 @@ maybe_credit_billing_id(Context) ->
     {'ok', MasterAccountId} = kapps_util:get_master_account_id(),
     CreditAccountId = cb_context:account_id(Context),
 
-    case kz_services:find_reseller_id(CreditAccountId) of
+    case kz_services_reseller:find_id(CreditAccountId) of
         MasterAccountId when AuthAccountId =:= MasterAccountId
                              andalso CreditAccountId =:= MasterAccountId ->
             lager:debug("master account is about to credit himself - should be always free"),
@@ -228,7 +222,7 @@ maybe_debit_billing_id(Context) ->
     AuthAccountId = cb_context:auth_account_id(Context),
     {'ok', MasterAccountId} = kapps_util:get_master_account_id(),
 
-    case kz_services:find_reseller_id(cb_context:account_id(Context)) of
+    case kz_services_reseller:find_id(cb_context:account_id(Context)) of
         MasterAccountId ->
             lager:debug("invoking a bookkeeper to remove requested credit"),
             maybe_create_debit_tansaction(Context);
@@ -310,15 +304,6 @@ validate_transaction(Context, ?CURRENT_BALANCE, ?HTTP_GET) ->
                       ,[{fun cb_context:set_resp_status/2, 'success'}
                        ,{fun cb_context:set_resp_data/2, JObj}
                        ]);
-validate_transaction(Context, ?MONTHLY, ?HTTP_GET) ->
-    case crossbar_view:time_range(Context) of
-        {CreatedFrom, CreatedTo} ->
-            Reason = cb_context:req_value(Context, <<"reason">>),
-            fetch_monthly_recurring(Context, CreatedFrom, CreatedTo, Reason);
-        Context1 -> Context1
-    end;
-validate_transaction(Context, ?SUBSCRIPTIONS, ?HTTP_GET) ->
-    filter_subscriptions(Context);
 validate_transaction(Context, ?CREDIT, ?HTTP_PUT) ->
     validate_credit(Context);
 validate_transaction(Context, ?DEBIT, ?HTTP_DELETE) ->
@@ -339,8 +324,8 @@ validate_credit(Context) ->
     case cb_context:is_superduper_admin(Context) of
         'true' -> validate_credit(Context, Amount);
         'false' ->
-            case kz_services:is_reseller(cb_context:auth_account_id(Context))
-                orelse MasterAccountId =:= kz_services:find_reseller_id(cb_context:account_id(Context))
+            case kz_services_reseller:is_reseller(cb_context:auth_account_id(Context))
+                orelse MasterAccountId =:= kz_services_reseller:find_id(cb_context:account_id(Context))
             of
                 'true' -> validate_credit(Context, Amount);
                 'false' -> cb_context:add_system_error('forbidden', Context)
@@ -364,7 +349,7 @@ validate_debit(Context) ->
     case cb_context:is_superduper_admin(Context) of
         'true' -> validate_debit(Context, Amount);
         'false' ->
-            case kz_services:is_reseller(cb_context:auth_account_id(Context)) of
+            case kz_services_reseller:is_reseller(cb_context:auth_account_id(Context)) of
                 'true' -> validate_debit(Context, Amount);
                 'false' -> cb_context:add_system_error('forbidden', Context)
             end
@@ -382,7 +367,7 @@ validate_debit(Context, Amount) ->
     AuthAccountId = cb_context:auth_account_id(Context),
     AccountId = cb_context:account_id(Context),
     case AuthAccountId == MasterAccountId
-        orelse AuthAccountId == kz_services:find_reseller_id(AccountId)
+        orelse AuthAccountId == kz_services_reseller:find_id(AccountId)
     of
         'true' ->
             cb_context:set_resp_status(Context, 'success');
@@ -440,97 +425,6 @@ fetch_transactions(Context, From, To, Reason) ->
             Filtered = kz_transactions:filter_by_reason(Reason, Transactions),
             JObjs = kz_transactions:to_public_json(Filtered),
             send_resp({'ok', JObjs}, Context)
-    end.
-
-%%------------------------------------------------------------------------------
-%% @doc
-%% @end
-%%------------------------------------------------------------------------------
--spec fetch_monthly_recurring(cb_context:context(), kz_time:gregorian_seconds(), kz_time:gregorian_seconds(), kz_term:api_binary()) ->
-                                     cb_context:context().
-fetch_monthly_recurring(Context, From, To, Reason) ->
-    case kz_bookkeeper_braintree:transactions(cb_context:account_id(Context), From, To) of
-        {'error', _}=E -> send_resp(E, Context);
-        {'ok', Transactions} ->
-            JObjs = [kz_transaction:to_public_json(Transaction)
-                     || Transaction <- kz_transactions:filter_by_reason(Reason, Transactions),
-                        kz_transaction:code(Transaction) =:= ?CODE_MONTHLY_RECURRING
-                    ],
-            send_resp({'ok', JObjs}, Context)
-    end.
-
-%%------------------------------------------------------------------------------
-%% @doc
-%% @end
-%%------------------------------------------------------------------------------
--spec filter_subscriptions(cb_context:context()) -> cb_context:context().
-filter_subscriptions(Context) ->
-    AccountId = cb_context:account_id(Context),
-    case kz_service_transactions:current_billing_period(AccountId, 'subscriptions') of
-        'not_found' ->
-            send_resp({'error', <<"no data found in braintree">>}, Context);
-        'unknown_error' ->
-            send_resp({'error', <<"unknown braintree error">>}, Context);
-        BSubscriptions ->
-            JObjs = [filter_subscription(BSub) || BSub <- BSubscriptions],
-            send_resp({'ok', JObjs}, Context)
-    end.
-
-%%------------------------------------------------------------------------------
-%% @doc
-%% @end
-%%------------------------------------------------------------------------------
--spec filter_subscription(kz_json:object()) -> kz_json:object().
-filter_subscription(BSubscription) ->
-    Routines = [fun clean_braintree_subscription/1
-               ,fun correct_date_braintree_subscription/1
-               ],
-    lists:foldl(fun(F, BSub) -> F(BSub) end, BSubscription, Routines).
-
-%%------------------------------------------------------------------------------
-%% @doc
-%% @end
-%%------------------------------------------------------------------------------
--spec clean_braintree_subscription(kz_json:object()) -> kz_json:object().
-clean_braintree_subscription(BSubscription) ->
-    RemoveKeys = [<<"billing_dom">>
-                 ,<<"failure_count">>
-                 ,<<"merchant_account_id">>
-                 ,<<"never_expires">>
-                 ,<<"paid_through_date">>
-                 ,<<"payment_token">>
-                 ,<<"trial_period">>
-                 ,<<"do_not_inherit">>
-                 ,<<"start_immediately">>
-                 ,<<"prorate_charges">>
-                 ,<<"revert_on_prorate_fail">>
-                 ,<<"replace_add_ons">>
-                 ,<<"create">>
-                 ],
-    kz_json:delete_keys(RemoveKeys, BSubscription).
-
-%%------------------------------------------------------------------------------
-%% @doc
-%% @end
-%%------------------------------------------------------------------------------
--spec correct_date_braintree_subscription(kz_json:object()) -> kz_json:object().
-correct_date_braintree_subscription(BSubscription) ->
-    Keys = [<<"billing_first_date">>
-           ,<<"billing_end_date">>
-           ,<<"billing_start_date">>
-           ,<<"next_bill_date">>
-           ],
-    lists:foldl(fun correct_date_braintree_subscription_fold/2, BSubscription, Keys).
-
--spec correct_date_braintree_subscription_fold(kz_term:ne_binary(), kz_json:object()) -> kz_json:object().
-correct_date_braintree_subscription_fold(Key, BSub) ->
-    case kz_json:get_value(Key, BSub, 'null') of
-        'null' -> BSub;
-        Value ->
-            [Y, M, D | _] = string:tokens(binary_to_list(Value), "-"),
-            DateTime = {{list_to_integer(Y), list_to_integer(M), list_to_integer(D)}, {0, 0, 0}},
-            Timestamp = calendar:datetime_to_gregorian_seconds(DateTime),
-            kz_json:set_value(Key, Timestamp, BSub)
     end.
 
 %%------------------------------------------------------------------------------

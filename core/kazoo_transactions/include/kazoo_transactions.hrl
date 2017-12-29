@@ -6,8 +6,6 @@
 -type units() :: non_neg_integer().
 -type dollars() :: number().
 
--define(TOPUP_CONFIG, <<"topup">>).
-
 -define(CODE_PER_MINUTE_CALL, 1001).
 -define(CODE_PER_MINUTE_CALL_SUB_ACCOUNT, 1002).
 -define(CODE_FEATURE_ACTIVATION, 2001).
