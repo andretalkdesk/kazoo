@@ -68,7 +68,12 @@ exec(Call, [#xmlElement{name='Conference'
                               }
                              ]),
 
+    lager:info("BARBIX: Added binding"),
+
     ConfDoc = build_conference_doc(Call, ConfId, ConfProps),
+
+    lager:info("BARBIX: Added Conference DOC '~s'",  [ConfDoc]),
+
 
     ConfReq = [{<<"Call">>, kapps_call:to_json(Call)}
               ,{<<"Conference-ID">>, ConfId}
