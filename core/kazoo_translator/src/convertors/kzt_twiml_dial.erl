@@ -72,7 +72,7 @@ exec(Call, [#xmlElement{name='Conference'
 
     ConfDoc = build_conference_doc(Call, ConfId, ConfProps),
 
-    lager:info("BARBIX: Added Conference DOC '~s'",  [ConfDoc]),
+    lager:info("BARBIX: Added Conference DOC '~s'", [ConfDoc]),
 
 
     ConfReq = [{<<"Call">>, kapps_call:to_json(Call)}
@@ -90,10 +90,17 @@ exec(Call, [#xmlElement{name='Conference'
     _WaitMethod = kzt_util:http_method(ConfProps),
 
     CallWithConf = add_conference_profile(Call, ConfProps),
+    lager:info("Barbix1 added profile"),
+
     SetupCall = setup_call_for_dial(CallWithConf, DialProps),
+    lager:info("Barbix2 setup_call_for_dial"),
+
     AnsweredCall = kzt_util:update_call_status(?STATUS_ANSWERED, SetupCall),
+    lager:info("Barbix3 update Call Statust"),
 
     {'ok', Call1} = kzt_receiver:wait_for_conference(AnsweredCall),
+    lager:info("Barbix4 Wait for conference"),
+
 
     _ = maybe_end_dial(Call1, DialProps),
     {'stop', Call1};
