@@ -78,7 +78,7 @@ exec(Call, [#xmlElement{name='Conference'
               ],
     kapi_conference:publish_discovery_req(ConfReq),
 
-    lager:debug("published conference request"),
+    lager:info("published conference request"),
 
     %% Will need to support fetching media OR TwiML
     _WaitUrl = props:get_value('waitUrl', ConfProps),
@@ -184,12 +184,12 @@ maybe_end_dial(Call, Props) ->
     maybe_end_dial(Call, Props, kzt_twiml_util:action_url(Props)).
 
 maybe_end_dial(Call, _Props, 'undefined') ->
-    lager:debug("a-leg status after bridge: ~s", [kzt_util:get_call_status(Call)]),
+    lager:info("a-leg status after bridge: ~s", [kzt_util:get_call_status(Call)]),
     {'ok', Call}; % will progress to next TwiML element
 maybe_end_dial(Call, Props, ActionUrl) ->
     CurrentUri = kzt_util:get_voice_uri(Call),
     NewUri = kzt_util:resolve_uri(CurrentUri, ActionUrl),
-    lager:debug("sending req to ~s: ~s", [ActionUrl, NewUri]),
+    lager:info("sending req to ~s: ~s", [ActionUrl, NewUri]),
     Method = kzt_util:http_method(Props),
 
     Setters = [{fun kzt_util:set_voice_uri_method/2, Method}
@@ -386,6 +386,7 @@ build_conference_doc(Call, ConfId, ConfProps) ->
                       ,{<<"profile_name">>, ConfId}
                       ,{<<"profile">>, conference_profile(kapps_call:account_id(Call), ConfProps)}
                       ,{<<"pvt_account_id">>, kapps_call:account_id(Call)}
+                      ,{<<"moh-sound">>, props:get_value('waitUrl', ConfProps, <<"http://com.twilio.music.classical.s3.amazonaws.com/Mellotroniac_-_Flight_Of_Young_Hearts_Flute.mp3">>)}
                       ]).
 
 require_moderator('undefined') -> 'false';
